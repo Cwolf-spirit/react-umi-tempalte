@@ -1,0 +1,59 @@
+{
+  "name": "data-transmission",
+  "private": true,
+  "author": "huliangliang <hu_bei510@163.com>",
+  "scripts": {
+    "build": "umi build",
+    "dev": "umi dev",
+    "develop": "cross-env UMI_ENV=develop umi build",
+    "postinstall": "umi setup",
+    "lint": "umi lint --quiet --fix --cssinjs",
+    "openapi": "umi openapi",
+    "product": "cross-env UMI_ENV=product umi build",
+    "setup": "npm run openapi && umi setup",
+    "start": "npm run openapi && umi dev"
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged",
+      "commit-msg": "commitlint -E HUSKY_GIT_PARAMS"
+    }
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,css,less}": [
+      "yarn lint"
+    ],
+    "*.{js,jsx,less,md,json}": [
+      "prettier --write"
+    ],
+    "*.ts?(x)": [
+      "prettier --parser=typescript --write"
+    ]
+  },
+  "dependencies": {
+    "@ant-design/icons": "^5.0.1",
+    "@umijs/max-plugin-openapi": "^2.0.3",
+    "ahooks": "^3.7.7",
+    "antd": "^5.17.0",
+    "axios": "^1.4.0",
+    "dayjs": "^1.11.11",
+    "echarts": "^5.5.0",
+    "lodash": "^4.17.21",
+    "umi": "^4.0.69"
+  },
+  "devDependencies": {
+    "@types/lodash": "^4.14.194",
+    "@types/react": "^18.0.33",
+    "@types/react-dom": "^18.0.11",
+    "@umijs/lint": "^4.0.64",
+    "@umijs/plugins": "^4.0.64",
+    "cross-env": "^7.0.3",
+    "eslint": "^8.42.0",
+    "husky": "^8.0.3",
+    "lint-staged": "^13.2.0",
+    "prettier": "^2.8.7",
+    "stylelint": "^15.4.0",
+    "typescript": "^5.0.3",
+    "umi-plugin-circular-check": "^1.0.0"
+  }
+}

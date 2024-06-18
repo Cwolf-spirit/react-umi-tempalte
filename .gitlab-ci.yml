@@ -1,0 +1,252 @@
+# 默认环境变量
+# $CI_PROJECT_NAME: 仓库名
+# $CI_PROJECT_DIR: 项目绝对目录
+# $CI_PROJECT_URL: 仓库地址
+# $CI_COMMIT_REF_NAME: 提交的分支名
+# $CI_COMMIT_SHORT_SHA: Git Commit 短ID, 用作image的tag
+
+# Harbor、Kube秘钥等设置在Gitlab环境变量里，且隐藏敏感信息
+# 镜像的组成形式：URL / group / project_name-branch : short_commit_id
+# eg: harbor.tarsocial.com/tarsocial/demo:k98saha
+
+default:
+  image: harbor.tarsocial.com/base-images/busybox:stable
+  retry: 1
+  
+variables:
+    # 加快 Clone 的 变量
+    GIT_STRATEGY: fetch
+    GIT_DEPTH: "3"
+    GIT_CLONE_PATH: $CI_BUILDS_DIR/$CI_CONCURRENT_ID/$CI_PROJECT_PATH  
+
+stages:
+  - EnvCheck
+  - Manual
+  - NpmBuild
+  - UploadOSS
+  - Build
+  - Deploy
+  - Status
+  - AddDNS
+  - SendMSG
+
+IsBelongItself:
+  stage: EnvCheck
+  script:
+    - |
+      set -ex
+      source .gitlab-ci/gitlab-ci.env
+      [[ x"$CI_PROJECT_URL" == x"$repo_url" ]] || exit 1
+  only:
+    - develop
+    - devuat
+    - product
+  tags:
+    - ucrunner
+
+EnvToGlobal:
+  stage: EnvCheck
+  script: 
+    - |
+      source .gitlab-ci/gitlab-ci.env
+      case $CI_COMMIT_REF_NAME in
+          develop|devuat ) 
+            app_name="t-$sub_domain"
+            slb_ip=$dev_slb_ip
+            harbor_url=$devuat_harbor
+            nginx_wp=1
+            replica_count=1
+            kube_config=CI_WEBSTACK_${devuat_zone}_KUBECONFIG
+            [[ x"$CI_COMMIT_REF_NAME" == x"devuat" ]] && app_name="u-$sub_domain"
+            ;;
+          product ) 
+            app_name="$sub_domain"
+            slb_ip=$prod_slb_ip
+            harbor_url=$prod_harbor
+            replica_count=2
+            kube_config=CI_WEBSTACK_${prod_zone}_KUBECONFIG
+            ;;
+      esac
+      envs=$(sed -e '/^#/d' -e '/^$/d' .gitlab-ci/gitlab-ci.env)
+      for i in ${envs}; do
+        echo "$i"
+        echo "$i" >> ThisJob.env
+      done
+      echo "app_name=$app_name" >> ThisJob.env
+      echo "slb_ip=$slb_ip"  >> ThisJob.env
+      echo "harbor_url=$harbor_url" >> ThisJob.env   
+      echo "kube_config=$kube_config" >> ThisJob.env   
+      echo "nginx_wp=$nginx_wp" >> ThisJob.env
+      echo "replica_count=$replica_count" >> ThisJob.env
+      echo "commit_id=$CI_COMMIT_SHORT_SHA" >> ThisJob.env
+      echo "ref_name=$CI_COMMIT_REF_NAME" >> ThisJob.env
+  artifacts:
+    reports:
+      dotenv: ThisJob.env  
+  only:
+    - develop
+    - devuat
+    - product
+  tags:
+    - ucrunner
+
+IsManualDeploy:
+  stage: Manual
+  script: 
+    - echo "product must be confirm"
+  only:
+    - devuat
+    - product
+  tags:
+    - ucrunner
+  when: manual
+  allow_failure: false
+
+NpmBuildDist:
+  image: harbor.tarsocial.com/base-images/node:${node_version}
+  stage: NpmBuild
+  script:
+    - |
+      set -xe
+      [ -d dist ] && exit 0
+      if [ $is_auto_build -eq 1 ]; then
+        npm install
+        npm run ${ref_name}
+      fi
+      ls -al
+  artifacts:
+    expire_in: 1 days
+    name: "${commit_id}"
+    paths:
+      - dist      
+  only:
+    - develop
+    - devuat
+    - product
+  tags:
+    - ucrunner      
+
+UploadFiles:
+  image: harbor.tarsocial.com/base-images/gitlab-utils:1.4
+  stage: UploadOSS
+  script:
+    - echo tosutil cp  -r -u  -flat dist/ tos://tarproject/tarsocial/${sub_domain}/${ref_name}/ 
+    - tosutil cp  -r  -u  -flat dist/ tos://tarproject/tarsocial/${sub_domain}/${ref_name}/
+  only:
+    - develop
+    - devuat
+    - product
+  tags:
+    - ucrunner
+
+BuildImage:
+  image: harbor.tarsocial.com/base-images/docker:20.10.12
+  stage: Build
+  before_script: 
+    - |
+      set -xe
+      wp=${nginx_wp:-auto}
+      sed -i "s#auto#$wp#g" .gitlab-ci/nginx.conf
+      find .gitlab-ci/nginx.d -type f |grep -v ${ref_name} |xargs -n1 rm -f
+      cp -a ${CI_NGINX_DOCKERFILE}  Dockerfile
+      [ -f .gitlab-ci/Dockerfile ] &&  cp -f .gitlab-ci/Dockerfile  Dockerfile
+      cat Dockerfile
+      docker login -u "${CI_HARBOR_USER}" -p "${CI_HARBOR_TOKEN}" "${harbor_url}"
+  script:
+    - |
+      set -xe
+      docker build --rm --pull=true -f Dockerfile  -t  ${harbor_url}/${group}/${repo_name}-${ref_name}:${commit_id} .
+      docker push ${harbor_url}/${group}/${repo_name}-${ref_name}:${commit_id}
+  after_script:
+    - |
+      docker rmi  ${harbor_url}/${group}/${repo_name}-${ref_name}:${commit_id}
+  only:
+    - develop
+    - devuat
+    - product
+  tags:
+    - ucrunner
+
+
+DeployToK8s:
+  image: harbor.tarsocial.com/base-images/kubectl-helm:1.25.4
+  stage: Deploy
+  script:  
+    - |
+      set -xe
+      eval KUBECONFIG=\$${kube_config}
+      export KUBECONFIG=$KUBECONFIG
+      kubectl get ns ${app_name} || kubectl create ns ${app_name} 
+      helm repo add --username "${CI_HARBOR_USER}" --password "${CI_HARBOR_TOKEN}" helmapp https://harbor.tarsocial.com/chartrepo/helmapp
+      helm repo update
+      action=upgrade
+      helm -n ${app_name}  status  ${app_name} 2>&1 >/dev/null || action=install
+      [[ x"$action" == x"upgrade" ]] && flags='--reuse-values'
+      helm -n ${app_name}  ${action}  ${app_name}  helmapp/${helm_app}   $flags   \
+           --set image.repository="${harbor_url}/${group}/${repo_name}-${ref_name}"  \
+           --set image.tag="${commit_id}"    \
+           --set ingress.domain="${app_name}.${domain}" \
+           --set replicaCount="${replica_count}"
+  only:
+    - develop
+    - devuat
+    - product
+  tags:
+    - ucrunner
+
+CheckStatus:
+  image: harbor.tarsocial.com/base-images/kubectl-helm:1.25.4
+  stage: Status
+  script:
+    - |
+      set -xe 
+      eval KUBECONFIG=\$${kube_config}
+      export KUBECONFIG=$KUBECONFIG
+      kubectl get all -n ${app_name}
+      helm -n ${app_name}  status  ${app_name}
+  only:
+    - develop
+    - devuat
+    - product
+  tags:
+    - ucrunner 
+
+AddDnsRecord:
+  image: harbor.tarsocial.com/base-images/gitlab-utils:1.4
+  stage: AddDNS
+  script:  
+    - dnspod  ${app_name}  ${domain}  ${slb_ip}
+  only:
+    - develop
+    - devuat
+    - product
+  tags:
+    - ucrunner       
+
+FailureMsg:
+  image: harbor.tarsocial.com/base-images/gitlab-utils:1.4
+  stage: SendMSG
+  script:
+    - export ci_status=1
+    - msgbot
+  only:
+    - develop
+    - devuat
+    - product
+  tags:
+    - ucrunner
+  when: on_failure
+
+SuccessMsg:
+  image: harbor.tarsocial.com/base-images/gitlab-utils:1.4
+  stage: SendMSG
+  script:
+    - export ci_status=0
+    - msgbot
+  only:
+    - develop
+    - devuat
+    - product
+  tags:
+    - ucrunner
+  when: on_success
