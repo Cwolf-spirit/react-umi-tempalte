@@ -1,11 +1,9 @@
-import login_title from '@/assets/login_title.png';
-import logo from '@/assets/logo.png';
+import { LeftOutlined } from '@ant-design/icons';
 import { Layout, theme } from 'antd';
 import React, { useState } from 'react';
 import { Outlet } from 'umi';
 import Header from './components/Header';
 import MenuList from './components/Menu';
-import styles from './index.less';
 
 const { Sider } = Layout;
 
@@ -16,9 +14,8 @@ export default function LayoutWrapper() {
   } = theme.useToken();
 
   return (
-    <Layout className={styles.layoutWrapper}>
+    <Layout>
       <Sider
-        className={styles.leftSider}
         theme="dark"
         trigger={null}
         collapsible
@@ -28,9 +25,7 @@ export default function LayoutWrapper() {
           padding: '0 24px',
         }}
       >
-        <div className={styles.logo}>
-          <img src={!collapsed ? login_title : logo} />
-        </div>
+        <LeftOutlined />
         <MenuList />
       </Sider>
       <Layout style={{ backgroundColor: '#F2F6FD' }}>

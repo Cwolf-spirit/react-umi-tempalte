@@ -10,19 +10,6 @@ umi4 + antd5 + Typescript
 yarn && yarn start 测试环境
 yarn openapi 生成openapi
 ```
-### 发版流程
-1. main主分支
-2. 每次新需求，基于main分支创建feature分支
-3. feature分支开发完成后，feature分支合并到dev分支提测
-4. dev分支提测完成后，feature分支合并到uat分支发版提测
-5. uat分支发版完成后，feature分支合并到main分支发版
-
-### 路由
-
-动态路由，由接口返回。根据在 src/routes/index.ts 下定义的路由 CODE 和 ROUTES 做映射。
-路由配置可以在权限管理中添加；添加标准：导航栏要展示的类型为菜单，通过地址栏可以访问的页面为路由，页面中按钮的权限则为按钮。
-添加完成后需要将对应角色添加上相应的资源即可。
-**type：1=菜单，2=路由，0=按钮**
 
 ### 接口服务
 
