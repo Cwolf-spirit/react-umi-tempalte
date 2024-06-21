@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { Outlet } from 'umi';
 import Header from './components/Header';
 import MenuList from './components/Menu';
+import styles from './index.less';
 
 const { Sider } = Layout;
 
@@ -14,7 +15,7 @@ export default function LayoutWrapper() {
   } = theme.useToken();
 
   return (
-    <Layout>
+    <Layout className={styles.layoutWrapper}>
       <Sider
         theme="dark"
         trigger={null}
